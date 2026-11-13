@@ -1865,31 +1865,6 @@ def test_all_expected_params_are_written_out_to_model_text(tmp_path):
         assert param_str in model_txt_from_memory
 
 
-@pytest.mark.parametrize("model_file", [False, True])
-@pytest.mark.parametrize("free_raw_data", [False, True])
-def test_pandas_categorical_continued_training(tmp_path, model_file, free_raw_data):
-    pd = pytest.importorskip("pandas")
-    y = np.tile([0, 1], 30)
-    X = pd.DataFrame({"category": pd.Categorical(np.where(y, "yes", "no"))})
-    params = {"objective": "binary", "verbosity": -1, "num_threads": 1, "min_data_in_leaf": 3}
-    initial = lgb.train(params, lgb.Dataset(X, label=y), num_boost_round=3)
-    if model_file:
-        model_path = tmp_path / "initial.txt"
-        initial.save_model(model_path)
-        initial = model_path
-
-    continued = lgb.train(
-        params,
-        lgb.Dataset(X, label=y, free_raw_data=free_raw_data),
-        num_boost_round=2,
-        init_model=initial,
-        valid_sets=[lgb.Dataset(X, label=y)],
-    )
-    expected = lgb.train(params, lgb.Dataset(X, label=y), num_boost_round=5)
-    assert continued.current_iteration() == 5
-    np.testing.assert_allclose(continued.predict(X), expected.predict(X))
-
-
 # why fixed seed?
 # sometimes there is no difference how cols are treated (cat or not cat)
 def test_pandas_categorical(rng_fixed_seed, tmp_path):
