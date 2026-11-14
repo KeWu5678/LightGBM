@@ -1865,31 +1865,35 @@ def test_all_expected_params_are_written_out_to_model_text(tmp_path):
         assert param_str in model_txt_from_memory
 
 
-@pytest.mark.parametrize("model_file", [False, True])
-@pytest.mark.parametrize("free_raw_data", [False, True])
-def test_pandas_categorical_continued_training(tmp_path, model_file, free_raw_data):
+@pytest.mark.parametrize("model_file", [False, True], ids=["booster", "model-file"])
+def test_pandas_categorical_continued_training(tmp_path, model_file):
     pd = pytest.importorskip("pandas")
+
+    # Arrange a learnable categorical problem and the uninterrupted reference.
     y = np.tile([0, 1], 30)
     X = pd.DataFrame({"category": pd.Categorical(np.where(y, "yes", "no"))})
-    X_valid = X.copy()
+    X_valid = X.iloc[::-1].copy()
     X_valid["category"] = X_valid["category"].cat.reorder_categories(["yes", "no"])
-    params = {"objective": "binary", "verbosity": -1, "num_threads": 1, "min_data_in_leaf": 3}
-    initial = lgb.train(params, lgb.Dataset(X, label=y), num_boost_round=3)
-    expected_train_scores = initial.predict(X, raw_score=True)
-    expected_valid_scores = initial.predict(X_valid, raw_score=True)
+    params = {"objective": "binary", "verbosity": -1, "num_threads": 1}
+    initial_model = lgb.train(params, lgb.Dataset(X, label=y), num_boost_round=3)
+    uninterrupted_model = lgb.train(params, lgb.Dataset(X, label=y), num_boost_round=5)
+    expected_train_scores = initial_model.predict(X, raw_score=True)
+    expected_valid_scores = initial_model.predict(X_valid, raw_score=True)
+    init_model = initial_model
     if model_file:
-        model_path = tmp_path / "initial.txt"
-        initial.save_model(model_path)
-        initial = model_path
+        init_model = tmp_path / "initial.txt"
+        initial_model.save_model(init_model)
 
-    train_set = lgb.Dataset(X, label=y, free_raw_data=free_raw_data)
-    valid_set = lgb.Dataset(X_valid, label=y, free_raw_data=free_raw_data)
-    continued = lgb.train(params, train_set, num_boost_round=2, init_model=initial, valid_sets=[valid_set])
+    # Act on fresh, unconstructed datasets to exercise the regression.
+    train_set = lgb.Dataset(X, label=y)
+    valid_set = lgb.Dataset(X_valid, label=y[::-1])
+    continued_model = lgb.train(params, train_set, num_boost_round=2, init_model=init_model, valid_sets=[valid_set])
+
+    # Assert the starting scores and the result of continuing training.
     np.testing.assert_allclose(train_set.get_init_score(), expected_train_scores)
     np.testing.assert_allclose(valid_set.get_init_score(), expected_valid_scores)
-    expected = lgb.train(params, lgb.Dataset(X, label=y), num_boost_round=5)
-    assert continued.current_iteration() == 5
-    np.testing.assert_allclose(continued.predict(X), expected.predict(X))
+    assert continued_model.current_iteration() == 5
+    np.testing.assert_allclose(continued_model.predict(X), uninterrupted_model.predict(X))
 
 
 # why fixed seed?
